@@ -51,11 +51,11 @@ public:
 
 protected:
   virtual void add_information(
-    const DDS_SampleInfo & sample_info,
+    const DDS_InstanceHandle_t & instance_handle,
     const std::string & topic_name,
     const std::string & type_name);
 
-  virtual void remove_information(const DDS_SampleInfo & sample_info);
+  virtual void remove_information(const DDS_InstanceHandle_t & instance_handle);
 
 private:
   struct TopicDescriptor

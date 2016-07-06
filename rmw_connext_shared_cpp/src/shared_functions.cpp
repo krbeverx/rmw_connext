@@ -21,7 +21,7 @@
 #include "rmw_connext_shared_cpp/shared_functions.hpp"
 
 void CustomDataReaderListener::add_information(
-  const DDS_SampleInfo & sample_info,
+  const DDS_InstanceHandle_t & instance_handle,
   const std::string & topic_name,
   const std::string & type_name)
 {
@@ -30,18 +30,18 @@ void CustomDataReaderListener::add_information(
   topic_types.insert(type_name);
   // store mapping to instance handle
   TopicDescriptor topic_descriptor;
-  topic_descriptor.instance_handle = sample_info.instance_handle;
+  topic_descriptor.instance_handle = instance_handle;
   topic_descriptor.name = topic_name;
   topic_descriptor.type = type_name;
   topic_descriptors.push_back(topic_descriptor);
 }
 
 void CustomDataReaderListener::remove_information(
-  const DDS_SampleInfo & sample_info)
+  const DDS_InstanceHandle_t & instance_handle)
 {
   // find entry by instance handle
   for (auto it = topic_descriptors.begin(); it != topic_descriptors.end(); ++it) {
-    if (DDS_InstanceHandle_equals(&it->instance_handle, &sample_info.instance_handle)) {
+    if (DDS_InstanceHandle_equals(&it->instance_handle, &instance_handle)) {
       // remove entries
       auto & topic_types = topic_names_and_types[it->name];
       topic_types.erase(topic_types.find(it->type));
@@ -75,9 +75,9 @@ void CustomPublisherListener::on_data_available(DDSDataReader * reader)
 
   for (auto i = 0; i < data_seq.length(); ++i) {
     if (info_seq[i].valid_data) {
-      add_information(info_seq[i], data_seq[i].topic_name, data_seq[i].type_name);
+      add_information(info_seq[i].instance_handle, data_seq[i].topic_name, data_seq[i].type_name);
     } else {
-      remove_information(info_seq[i]);
+      remove_information(info_seq[i].instance_handle);
     }
   }
 
@@ -112,9 +112,9 @@ void CustomSubscriberListener::on_data_available(DDSDataReader * reader)
 
   for (auto i = 0; i < data_seq.length(); ++i) {
     if (info_seq[i].valid_data) {
-      add_information(info_seq[i], data_seq[i].topic_name, data_seq[i].type_name);
+      add_information(info_seq[i].instance_handle, data_seq[i].topic_name, data_seq[i].type_name);
     } else {
-      remove_information(info_seq[i]);
+      remove_information(info_seq[i].instance_handle);
     }
   }
 

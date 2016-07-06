@@ -176,7 +176,7 @@ rmw_create_publisher(
     return nullptr;
   }
 
-  auto node_info = static_cast<ConnextNodeInfo *>(node->data);
+  ConnextNodeInfo * node_info = static_cast<ConnextNodeInfo *>(node->data);
   if (!node_info) {
     RMW_SET_ERROR_MSG("node info handle is null");
     return NULL;
@@ -303,6 +303,10 @@ rmw_create_publisher(
   }
   memcpy(const_cast<char *>(publisher->topic_name), topic_name, strlen(topic_name) + 1);
 
+  node_info->publisher_listener->add_information(
+    dds_publisher->get_instance_handle(), topic_name, type_name, EntityType::Publisher);
+  node_info->publisher_listener->trigger_graph_guard_condition();
+
   return publisher;
 fail:
   if (publisher) {
@@ -371,6 +375,9 @@ rmw_destroy_publisher(rmw_node_t * node, rmw_publisher_t * publisher)
   ConnextStaticPublisherInfo * publisher_info =
     static_cast<ConnextStaticPublisherInfo *>(publisher->data);
   if (publisher_info) {
+    node_info->publisher_listener->remove_information(
+      publisher_info->dds_publisher_->get_instance_handle(), EntityType::Publisher);
+    node_info->publisher_listener->trigger_graph_guard_condition();
     DDSPublisher * dds_publisher = publisher_info->dds_publisher_;
     if (dds_publisher) {
       if (publisher_info->topic_writer_) {
@@ -472,7 +479,7 @@ rmw_create_subscription(const rmw_node_t * node,
     return nullptr;
   }
 
-  auto node_info = static_cast<ConnextNodeInfo *>(node->data);
+  ConnextNodeInfo * node_info = static_cast<ConnextNodeInfo *>(node->data);
   if (!node_info) {
     RMW_SET_ERROR_MSG("node info handle is null");
     return NULL;
@@ -597,6 +604,11 @@ rmw_create_subscription(const rmw_node_t * node,
     goto fail;
   }
   memcpy(const_cast<char *>(subscription->topic_name), topic_name, strlen(topic_name) + 1);
+
+  node_info->subscriber_listener->add_information(
+    dds_subscriber->get_instance_handle(), topic_name, type_name, EntityType::Subscriber);
+  node_info->subscriber_listener->trigger_graph_guard_condition();
+
   return subscription;
 fail:
   if (subscription) {
@@ -674,6 +686,9 @@ rmw_destroy_subscription(rmw_node_t * node, rmw_subscription_t * subscription)
   ConnextStaticSubscriberInfo * subscriber_info =
     static_cast<ConnextStaticSubscriberInfo *>(subscription->data);
   if (subscriber_info) {
+    node_info->subscriber_listener->remove_information(
+      subscriber_info->dds_subscriber_->get_instance_handle(), EntityType::Subscriber);
+    node_info->subscriber_listener->trigger_graph_guard_condition();
     auto dds_subscriber = subscriber_info->dds_subscriber_;
     if (dds_subscriber) {
       auto topic_reader = subscriber_info->topic_reader_;
@@ -894,6 +909,7 @@ rmw_create_client(
   void * requester = nullptr;
   void * buf = nullptr;
   ConnextStaticClientInfo * client_info = nullptr;
+  DDS::DataWriter * request_datawriter = nullptr;
 
   // Begin inializing elements.
   client = rmw_client_allocate();
@@ -952,6 +968,22 @@ rmw_create_client(
     goto fail;
   }
   memcpy(const_cast<char *>(client->service_name), service_name, strlen(service_name) + 1);
+
+  node_info->subscriber_listener->add_information(
+    response_datareader->get_instance_handle(),
+    response_datareader->get_topicdescription()->get_name(),
+    response_datareader->get_topicdescription()->get_type_name(),
+    EntityType::Subscriber);
+  request_datawriter =
+    static_cast<DDS::DataWriter *>(callbacks->get_request_datawriter(requester));
+  node_info->publisher_listener->add_information(
+    request_datawriter->get_instance_handle(),
+    request_datawriter->get_topic()->get_name(),
+    request_datawriter->get_topic()->get_type_name(),
+    EntityType::Publisher);
+  // Only trigger one of the graph condition's, as it's the same guard condition.
+  node_info->publisher_listener->trigger_graph_guard_condition();
+
   return client;
 fail:
   if (client) {
@@ -978,7 +1010,7 @@ fail:
 }
 
 rmw_ret_t
-rmw_destroy_client(rmw_client_t * client)
+rmw_destroy_client(rmw_node_t * node, rmw_client_t * client)
 {
   if (!client) {
     RMW_SET_ERROR_MSG("client handle is null");
@@ -992,8 +1024,22 @@ rmw_destroy_client(rmw_client_t * client)
   auto result = RMW_RET_OK;
   ConnextStaticClientInfo * client_info = static_cast<ConnextStaticClientInfo *>(client->data);
 
+  ConnextNodeInfo * node_info = static_cast<ConnextNodeInfo *>(node->data);
+
   if (client_info) {
     auto response_datareader = client_info->response_datareader_;
+
+    node_info->subscriber_listener->remove_information(
+      client_info->response_datareader_->get_instance_handle(), EntityType::Subscriber);
+    DDS::DataWriter * request_datawriter = static_cast<DDS::DataWriter *>(
+      client_info->callbacks_->get_request_datawriter(client_info->requester_)
+    );
+    node_info->publisher_listener->remove_information(
+      request_datawriter->get_instance_handle(),
+      EntityType::Publisher);
+    // Only trigger one of the graph condition's, as it's the same guard condition.
+    node_info->publisher_listener->trigger_graph_guard_condition();
+
     if (response_datareader) {
       auto read_condition = client_info->read_condition_;
       if (read_condition) {
@@ -1096,7 +1142,7 @@ rmw_create_service(
     return nullptr;
   }
 
-  auto node_info = static_cast<ConnextNodeInfo *>(node->data);
+  ConnextNodeInfo * node_info = static_cast<ConnextNodeInfo *>(node->data);
   if (!node_info) {
     RMW_SET_ERROR_MSG("node info handle is null");
     return NULL;
@@ -1123,6 +1169,7 @@ rmw_create_service(
   void * buf = nullptr;
   ConnextStaticServiceInfo * service_info = nullptr;
   rmw_service_t * service = nullptr;
+  DDS::DataWriter * reply_datawriter = nullptr;
   // Begin initializing elements.
   service = rmw_service_allocate();
   if (!service) {
@@ -1180,6 +1227,22 @@ rmw_create_service(
     goto fail;
   }
   memcpy(const_cast<char *>(service->service_name), service_name, strlen(service_name) + 1);
+
+  node_info->subscriber_listener->add_information(
+    request_datareader->get_instance_handle(),
+    request_datareader->get_topicdescription()->get_name(),
+    request_datareader->get_topicdescription()->get_type_name(),
+    EntityType::Subscriber);
+  reply_datawriter =
+    static_cast<DDS::DataWriter *>(callbacks->get_reply_datawriter(replier));
+  node_info->publisher_listener->add_information(
+    reply_datawriter->get_instance_handle(),
+    reply_datawriter->get_topic()->get_name(),
+    reply_datawriter->get_topic()->get_type_name(),
+    EntityType::Publisher);
+  // Only trigger one of the graph condition's, as it's the same guard condition.
+  node_info->publisher_listener->trigger_graph_guard_condition();
+
   return service;
 fail:
   if (service) {
@@ -1213,7 +1276,7 @@ fail:
 }
 
 rmw_ret_t
-rmw_destroy_service(rmw_service_t * service)
+rmw_destroy_service(rmw_node_t * node, rmw_service_t * service)
 {
   if (!service) {
     RMW_SET_ERROR_MSG("service handle is null");
@@ -1227,8 +1290,23 @@ rmw_destroy_service(rmw_service_t * service)
   auto result = RMW_RET_OK;
   ConnextStaticServiceInfo * service_info = static_cast<ConnextStaticServiceInfo *>(service->data);
 
+  ConnextNodeInfo * node_info = static_cast<ConnextNodeInfo *>(node->data);
+
   if (service_info) {
     auto request_datareader = service_info->request_datareader_;
+
+    node_info->subscriber_listener->remove_information(
+      service_info->request_datareader_->get_instance_handle(),
+      EntityType::Subscriber);
+    DDS::DataWriter * reply_datawriter = static_cast<DDS::DataWriter *>(
+      service_info->callbacks_->get_reply_datawriter(service_info->replier_)
+    );
+    node_info->publisher_listener->remove_information(
+      reply_datawriter->get_instance_handle(),
+      EntityType::Publisher);
+    // Only trigger one of the graph condition's, as it's the same guard condition.
+    node_info->publisher_listener->trigger_graph_guard_condition();
+
     if (request_datareader) {
       auto read_condition = service_info->read_condition_;
       if (read_condition) {
@@ -1547,10 +1625,6 @@ rmw_service_server_is_available(
   const rmw_client_t * client,
   bool * is_available)
 {
-  // TODO(wjwwood): remove this once local graph changes are detected.
-  RMW_SET_ERROR_MSG("not implemented");
-  return RMW_RET_ERROR;
-
   if (!node) {
     RMW_SET_ERROR_MSG("node handle is null");
     return RMW_RET_ERROR;
@@ -1590,7 +1664,9 @@ rmw_service_server_is_available(
     RMW_SET_ERROR_MSG("requester handle is null");
     return RMW_RET_ERROR;
   }
-  const char * request_topic_name = callbacks->get_request_topic_name(requester);
+  DDS::DataWriter * request_datawriter =
+    static_cast<DDS::DataWriter *>(callbacks->get_request_datawriter(requester));
+  const char * request_topic_name = request_datawriter->get_topic()->get_name();
   if (!request_topic_name) {
     RMW_SET_ERROR_MSG("could not get request topic name");
     return RMW_RET_ERROR;
